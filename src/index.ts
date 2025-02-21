@@ -99,7 +99,7 @@ const subscribeToRedis = () => {
   redisSubscriber.on("message", (channel, message) => {
     const receivedMessage = JSON.parse(message);
 
-    io.to(receivedMessage?.roomId).emit('message', message);
+    io.to(receivedMessage?.roomId).emit('message', receivedMessage);
 
     if (receivedMessage?.serverId !== PORT) {
       console.log("Redis Message Received:", receivedMessage);

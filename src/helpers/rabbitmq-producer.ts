@@ -1,27 +1,29 @@
 import amqp from 'amqplib';
 
-async function sendMessage(data:any) {
-    const connection = await amqp.connect('amqp://localhost'); // Connect to RabbitMQ
-    const channel = await connection.createChannel();          // Create a channel
+const sendMessage = async (message: any) => {
+    try {
+        const connection = await amqp.connect('amqp://localhost'); // Connect to RabbitMQ
+        const channel = await connection.createChannel(); // Create a channel
 
-    const queue = 'chattings';                                  // Name of the queue
+        const exchange = 'chat-app'; 
+        const routingKey = 'chat-db'; 
 
-    // Assert that the queue exists
-    await channel.assertQueue(queue, {
-        durable: true,      // Make sure the queue survives RabbitMQ restarts
-    });
+      
+        await channel.assertExchange(exchange, 'direct', { durable: true });
 
-    const message = JSON.stringify(data);
-    channel.sendToQueue(queue, Buffer.from(message), { persistent: true });
+        channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)), {
+            persistent: true,
+        });
 
-    console.log("Task sent to queue : ",message)
+        console.log('Sent message:', message);
 
-    // Close the channel and connection
-    await channel.close();
-    await connection.close();
-}
+        await channel.close();
+        await connection.close();
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
+};
 
 
-// sendMessage().catch(console.error);
 
 export default sendMessage
