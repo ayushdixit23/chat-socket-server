@@ -99,7 +99,13 @@ const subscribeToRedis = () => {
   redisSubscriber.on("message", (channel, message) => {
     const receivedMessage = JSON.parse(message);
 
-    io.to(receivedMessage?.roomId).emit('message', receivedMessage);
+    if (receivedMessage?.type === "message") {
+      io.to(receivedMessage?.roomId).emit("message", receivedMessage);
+    } else if (receivedMessage?.type === "typing") {
+      io.to(receivedMessage?.roomId).emit("typing", receivedMessage);
+    } else if (receivedMessage?.type === "not-typing") {
+      io.to(receivedMessage?.roomId).emit("not-typing", receivedMessage);
+    }
 
     if (receivedMessage?.serverId !== PORT) {
       console.log("Redis Message Received:", receivedMessage);
@@ -144,10 +150,20 @@ io.on("connection", (socket) => {
 
   socket.on("message", async (data) => {
     console.log("Received message at socket server:", data);
-    await publishToRedis({ ...data, serverId: process.env.PORT });
+    await publishToRedis({ ...data, type: "message", serverId: process.env.PORT });
     console.log(`Message sent to RabbitMQ: ${JSON.stringify(data)}`);
     await sendMessage(data);
 
+  });
+
+  socket.on("typing", async (data) => {
+    console.log(data)
+    await publishToRedis({ ...data, type: "typing", serverId: process.env.PORT });
+  });
+
+  socket.on("not-typing", async (data) => {
+    console.log(data)
+    await publishToRedis({ ...data, type: "not-typing", serverId: process.env.PORT });
   });
 
   socket.on("disconnect", () => {
