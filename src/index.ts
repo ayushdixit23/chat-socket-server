@@ -29,7 +29,6 @@ const io = new Server(server, {
   },
 });
 
-
 // Middlewares
 app.use(helmet()); // Security headers
 
@@ -95,18 +94,38 @@ const publishToRedis = async (message: any) => {
 // Redis Subscribe Function (Runs Once)
 const subscribeToRedis = () => {
   redisSubscriber.subscribe("chat_channel");
+  redisSubscriber.subscribe("online_users_update");
 
-  redisSubscriber.on("message", (channel, message) => {
+  redisSubscriber.on("message", async (channel, message) => {
     const receivedMessage = JSON.parse(message);
 
-    if (receivedMessage?.messageType === "message") {
-      io.to(receivedMessage?.roomId).emit("message", receivedMessage);
-    } else if (receivedMessage?.messageType === "typing") {
-      io.to(receivedMessage?.roomId).emit("typing", receivedMessage);
-    } else if (receivedMessage?.messageType === "not-typing") {
-      io.to(receivedMessage?.roomId).emit("not-typing", receivedMessage);
+    if (channel === "chat_channel") {
+      if (receivedMessage?.messageType === "message") {
+        io.to(receivedMessage?.roomId).emit("message", receivedMessage);
+        io.to(receivedMessage?.receiverId).emit("user-messages",receivedMessage)
+      } else if (receivedMessage?.messageType === "typing") {
+        io.to(receivedMessage?.roomId).emit("typing", receivedMessage);
+      } else if (receivedMessage?.messageType === "not-typing") {
+        io.to(receivedMessage?.roomId).emit("not-typing", receivedMessage);
+      }
     }
 
+    if (channel == "online_users_update") {
+      if (
+        receivedMessage.type === "connect" ||
+        receivedMessage.type === "disconnect"
+      ) {
+        // Fetch updated list of online users
+        const onlineUsers = await redisPublisher.smembers("online_users");
+        io.emit("online-users", onlineUsers);
+      } else if (receivedMessage.type === "check-user-online") {
+        console.log(receivedMessage,"check-user-online")
+        io.to(receivedMessage?.roomId).emit(
+          "check-user:online",
+          receivedMessage
+        );
+      }
+    }
     // if (receivedMessage?.serverId !== PORT) {
     //   console.log("Redis Message Received:", receivedMessage);
     // }
@@ -117,7 +136,7 @@ const subscribeToRedis = () => {
     setTimeout(() => {
       console.log("Reconnecting Redis Subscriber...");
       subscribeToRedis();
-    }, 5000); // Retry after 5 seconds
+    }, 5000);
   });
 };
 
@@ -125,12 +144,22 @@ io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
 
-    const decoded = verifyToken(token)
+    const decoded = verifyToken(token);
 
     if (!decoded) {
       return next(new Error("Authentication failed: Invalid token"));
     }
     const { id: userId } = decoded;
+
+    // @ts-ignore
+    socket.userId = userId;
+
+    // Add user to Redis and notify all instances
+    await redisPublisher.sadd("online_users", userId);
+    await redisPublisher.publish(
+      "online_users_update",
+      JSON.stringify({ type: "connect", userId })
+    );
 
     if (userId) {
       socket.join(userId);
@@ -150,10 +179,13 @@ io.on("connection", (socket) => {
 
   socket.on("message", async (data) => {
     console.log("Received message at socket server:", data);
-    await publishToRedis({ ...data, messageType: "message", serverId: process.env.PORT });
+    await publishToRedis({
+      ...data,
+      messageType: "message",
+      serverId: process.env.PORT,
+    });
     console.log(`Message sent to RabbitMQ: ${JSON.stringify(data)}`);
     await sendMessage(data);
-
   });
 
   socket.on("join-room", (roomId) => {
@@ -167,17 +199,53 @@ io.on("connection", (socket) => {
   });
 
   socket.on("typing", async (data) => {
-    console.log(data)
-    await publishToRedis({ ...data, messageType: "typing", serverId: process.env.PORT });
+    console.log(data);
+    await publishToRedis({
+      ...data,
+      messageType: "typing",
+      serverId: process.env.PORT,
+    });
   });
 
   socket.on("not-typing", async (data) => {
-    console.log(data)
-    await publishToRedis({ ...data, messageType: "not-typing", serverId: process.env.PORT });
+    console.log(data);
+    await publishToRedis({
+      ...data,
+      messageType: "not-typing",
+      serverId: process.env.PORT,
+    });
   });
 
-  socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
+  // **New Event: Check if a user is online**
+  socket.on("check-user-online", async (targetUserId) => {
+    console.log(targetUserId,"runnded")
+    const isOnlineNumber = await redisPublisher.sismember(
+      "online_users",
+      targetUserId
+    );
+    const isOnline = isOnlineNumber ? true : false;
+    await redisPublisher.publish(
+      "online_users_update",
+      JSON.stringify({
+        type: "check-user-online",
+        isOnline,
+        roomId: targetUserId,
+        serverId: process.env.PORT,
+      })
+    );
+  });
+
+  socket.on("disconnect", async () => {
+    // @ts-ignore
+    console.log("Client disconnected:", socket.userId);
+
+    // @ts-ignore
+    await redisPublisher.srem("online_users", socket.userId);
+    await redisPublisher.publish(
+      "online_users_update",
+      // @ts-ignore
+      JSON.stringify({ type: "disconnect", userId: socket.userId })
+    );
   });
 });
 
