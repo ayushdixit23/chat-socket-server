@@ -102,7 +102,10 @@ const subscribeToRedis = () => {
     if (channel === "chat_channel") {
       if (receivedMessage?.messageType === "message") {
         io.to(receivedMessage?.roomId).emit("message", receivedMessage);
-        io.to(receivedMessage?.receiverId).emit("user-messages",receivedMessage)
+        io.to(receivedMessage?.receiverId).emit(
+          "user-messages",
+          receivedMessage
+        );
       } else if (receivedMessage?.messageType === "typing") {
         io.to(receivedMessage?.roomId).emit("typing", receivedMessage);
       } else if (receivedMessage?.messageType === "not-typing") {
@@ -118,7 +121,13 @@ const subscribeToRedis = () => {
         // Fetch updated list of online users
         const onlineUsers = await redisPublisher.smembers("online_users");
         io.emit("online-users", onlineUsers);
-      }
+      } else if (receivedMessage.type === "user-in-chat") {
+        io.to(receivedMessage.roomId).emit("is-present-in-chat", {
+          isPresent: receivedMessage.isPresent,
+          roomId: receivedMessage.roomId,
+          userId: receivedMessage.userId,
+        });
+      } 
     }
     if (receivedMessage?.serverId !== PORT) {
       console.log("Redis Message Received:", receivedMessage);
@@ -182,9 +191,14 @@ io.on("connection", (socket) => {
     await sendMessage(data);
   });
 
-  socket.on("join-room", (roomId) => {
+  socket.on("join-room", async (roomId) => {
     socket.join(roomId);
     console.log("Client joined room:", roomId);
+    await redisPublisher.publish(
+      "online_users_update",
+      // @ts-ignore
+      JSON.stringify({ type: "user-in-chat", userId: socket.userId, roomId, isPresent: true })
+    );
   });
 
   socket.on("leave-room", (roomId) => {
@@ -210,22 +224,12 @@ io.on("connection", (socket) => {
     });
   });
 
-  // **New Event: Check if a user is online**
-  socket.on("check-user-online", async (targetUserId) => {
-    console.log(targetUserId,"runnded")
-    const isOnlineNumber = await redisPublisher.sismember(
-      "online_users",
-      targetUserId
-    );
-    const isOnline = isOnlineNumber ? true : false;
+  socket.on("remove-user-from-chat", async (data) => {
+    console.log(`remove-user-from-chat: ${JSON.stringify(data)}`);
     await redisPublisher.publish(
       "online_users_update",
-      JSON.stringify({
-        type: "check-user-online",
-        isOnline,
-        roomId: targetUserId,
-        serverId: process.env.PORT,
-      })
+      // @ts-ignore
+      JSON.stringify({ type: "user-in-chat", userId: socket.userId, roomId: data.roomId, isPresent: false })
     );
   });
 
