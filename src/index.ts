@@ -118,17 +118,11 @@ const subscribeToRedis = () => {
         // Fetch updated list of online users
         const onlineUsers = await redisPublisher.smembers("online_users");
         io.emit("online-users", onlineUsers);
-      } else if (receivedMessage.type === "check-user-online") {
-        console.log(receivedMessage,"check-user-online")
-        io.to(receivedMessage?.roomId).emit(
-          "check-user:online",
-          receivedMessage
-        );
       }
     }
-    // if (receivedMessage?.serverId !== PORT) {
-    //   console.log("Redis Message Received:", receivedMessage);
-    // }
+    if (receivedMessage?.serverId !== PORT) {
+      console.log("Redis Message Received:", receivedMessage);
+    }
   });
 
   redisSubscriber.on("error", (err) => {
