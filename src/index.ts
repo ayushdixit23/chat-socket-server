@@ -110,10 +110,19 @@ const subscribeToRedis = () => {
         io.to(receivedMessage?.roomId).emit("typing", receivedMessage);
       } else if (receivedMessage?.messageType === "not-typing") {
         io.to(receivedMessage?.roomId).emit("not-typing", receivedMessage);
-      }else if(receivedMessage?.messageType === "messageToSeen"){
-        const messages = receivedMessage.messages.map((d:any)=>d.mesId)
-        const stringifyMessages = JSON.stringify(messages)
-        io.to(receivedMessage?.roomId).emit("mark-message-seen", stringifyMessages);
+      } else if (receivedMessage?.messageType === "messageToSeen") {
+        const messages = receivedMessage.messages.map((d: any) => d.mesId);
+        const stringifyMessages = JSON.stringify(messages);
+        io.to(receivedMessage?.roomId).emit(
+          "mark-message-seen",
+          stringifyMessages
+        );
+      } else if (receivedMessage?.messageType === "message:deleted") {
+
+        io.to(receivedMessage?.roomId).emit(
+          "message:deleted-update",
+          receivedMessage
+        );
       }
     }
 
@@ -126,8 +135,12 @@ const subscribeToRedis = () => {
         const onlineUsers = await redisPublisher.smembers("online_users");
         io.emit("online-users", onlineUsers);
       } else if (receivedMessage.type === "user-in-chat") {
-        const usersInRoom = await redisPublisher.smembers(`chat_room:${receivedMessage.roomId}`);
-        const otherUsers = usersInRoom.filter((id) => id !== receivedMessage.userId);
+        const usersInRoom = await redisPublisher.smembers(
+          `chat_room:${receivedMessage.roomId}`
+        );
+        const otherUsers = usersInRoom.filter(
+          (id) => id !== receivedMessage.userId
+        );
 
         otherUsers.forEach((userId) => {
           io.to(userId).emit("is-present-in-chat", {
@@ -137,7 +150,9 @@ const subscribeToRedis = () => {
           });
         });
       } else if (receivedMessage.type === "user-left-chat") {
-        const usersInRoom = await redisPublisher.smembers(`chat_room:${receivedMessage.roomId}`);
+        const usersInRoom = await redisPublisher.smembers(
+          `chat_room:${receivedMessage.roomId}`
+        );
 
         usersInRoom.forEach((userId) => {
           io.to(userId).emit("is-present-in-chat", {
@@ -155,7 +170,7 @@ const subscribeToRedis = () => {
       }
     }
     if (receivedMessage?.serverId !== PORT) {
-     // console.log("Redis Message Received:", receivedMessage);
+      // console.log("Redis Message Received:", receivedMessage);
     }
   });
 
@@ -213,7 +228,7 @@ io.on("connection", (socket) => {
       serverId: process.env.PORT,
     });
     console.log(`Message sent to RabbitMQ: ${JSON.stringify(data)}`);
-    await sendMessage(data,"insert");
+    await sendMessage(data, "insert");
   });
 
   socket.on("join-room", async (roomId) => {
@@ -270,7 +285,10 @@ io.on("connection", (socket) => {
 
   socket.on("check-user-in-chat", async (data) => {
     const { roomId, userId } = data;
-    const isPresent = await redisPublisher.sismember(`chat_room:${roomId}`, userId);
+    const isPresent = await redisPublisher.sismember(
+      `chat_room:${roomId}`,
+      userId
+    );
 
     await redisPublisher.publish(
       "online_users_update",
@@ -282,18 +300,18 @@ io.on("connection", (socket) => {
         userId: socket.userId,
       })
     );
-  })
+  });
 
   socket.on("messageToSeen", async (data) => {
-    console.log(`Event Registered`)
-    await sendMessage(data,"update");
+    console.log(`Event Registered`);
+    await sendMessage(data, "update");
     const parsedData = JSON.parse(data);
     await publishToRedis({
       ...parsedData,
       messageType: "messageToSeen",
       serverId: process.env.PORT,
     });
-  })
+  });
 
   socket.on("typing", async (data) => {
     await publishToRedis({
@@ -309,6 +327,29 @@ io.on("connection", (socket) => {
       messageType: "not-typing",
       serverId: process.env.PORT,
     });
+  });
+
+  socket.on("message:deleted", async ({ roomId, userId, mesId, action }) => {
+    if (action === "deleteForEveryOne") {
+      await publishToRedis({
+        roomId,
+        userId,
+        mesId,
+        messageType: "message:deleted",
+        serverId: process.env.PORT,
+      });
+    }
+
+    const data = {
+      roomId,
+      userId,
+      mesId,
+      actionType: "deletion",
+      action,
+    };
+    const stringifyMessgae = JSON.stringify(data);
+
+    await sendMessage(stringifyMessgae, "update");
   });
 
   socket.on("disconnect", async () => {
