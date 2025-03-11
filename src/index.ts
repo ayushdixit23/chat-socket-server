@@ -122,12 +122,33 @@ const subscribeToRedis = () => {
         const onlineUsers = await redisPublisher.smembers("online_users");
         io.emit("online-users", onlineUsers);
       } else if (receivedMessage.type === "user-in-chat") {
+        const usersInRoom = await redisPublisher.smembers(`chat_room:${receivedMessage.roomId}`);
+        const otherUsers = usersInRoom.filter((id) => id !== receivedMessage.userId);
+
+        otherUsers.forEach((userId) => {
+          io.to(userId).emit("is-present-in-chat", {
+            isPresent: true,
+            roomId: receivedMessage.roomId,
+            userId: receivedMessage.userId,
+          });
+        });
+      } else if (receivedMessage.type === "user-left-chat") {
+        const usersInRoom = await redisPublisher.smembers(`chat_room:${receivedMessage.roomId}`);
+
+        usersInRoom.forEach((userId) => {
+          io.to(userId).emit("is-present-in-chat", {
+            isPresent: false,
+            roomId: receivedMessage.roomId,
+            userId: receivedMessage.userId,
+          });
+        });
+      } else if (receivedMessage.type === "user-checking-chat") {
         io.to(receivedMessage.roomId).emit("is-present-in-chat", {
           isPresent: receivedMessage.isPresent,
           roomId: receivedMessage.roomId,
           userId: receivedMessage.userId,
         });
-      } 
+      }
     }
     if (receivedMessage?.serverId !== PORT) {
       console.log("Redis Message Received:", receivedMessage);
@@ -192,19 +213,73 @@ io.on("connection", (socket) => {
   });
 
   socket.on("join-room", async (roomId) => {
+    if (!roomId) return;
+
     socket.join(roomId);
-    console.log("Client joined room:", roomId);
+    //@ts-ignore
+    console.log(`User ${socket.userId} joined room: ${roomId}`);
+
+    // Add user to Redis room set
+    //@ts-ignore
+    await redisPublisher.sadd(`chat_room:${roomId}`, socket.userId);
+
+    // Publish event to notify other instances
     await redisPublisher.publish(
       "online_users_update",
-      // @ts-ignore
-      JSON.stringify({ type: "user-in-chat", userId: socket.userId, roomId, isPresent: true })
+      JSON.stringify({
+        type: "user-in-chat",
+        roomId,
+        //@ts-ignore
+        userId: socket.userId,
+      })
     );
   });
 
-  socket.on("leave-room", (roomId) => {
+  socket.on("leave-room", async (roomId) => {
+    if (!roomId) return;
+
     socket.leave(roomId);
-    console.log("Client leaved room:", roomId);
+    //@ts-ignore
+    console.log(`User ${socket.userId} left room: ${roomId}`);
+
+    // Remove user from Redis room set
+    //@ts-ignore
+    await redisPublisher.srem(`chat_room:${roomId}`, socket.userId);
+
+    // Check if the room is empty, if so, delete it
+    const usersInRoom = await redisPublisher.smembers(`chat_room:${roomId}`);
+    if (usersInRoom.length === 0) {
+      await redisPublisher.del(`chat_room:${roomId}`); // Cleanup empty rooms
+    }
+
+    // Publish event to notify all instances
+    await redisPublisher.publish(
+      "online_users_update",
+      JSON.stringify({
+        type: "user-left-chat",
+        roomId,
+        //@ts-ignore
+        userId: socket.userId,
+      })
+    );
   });
+
+  socket.on("check-user-in-chat", async (data) => {
+    const { roomId, userId } = data;
+    const isPresent = await redisPublisher.sismember(`chat_room:${roomId}`, userId);
+
+    await redisPublisher.publish(
+      "online_users_update",
+      JSON.stringify({
+        type: "user-checking-chat",
+        roomId,
+        isPresent: isPresent ? true : false,
+        //@ts-ignore
+        userId: socket.userId,
+      })
+    );
+  })
+
 
   socket.on("typing", async (data) => {
     console.log(data);
@@ -222,15 +297,6 @@ io.on("connection", (socket) => {
       messageType: "not-typing",
       serverId: process.env.PORT,
     });
-  });
-
-  socket.on("remove-user-from-chat", async (data) => {
-    console.log(`remove-user-from-chat: ${JSON.stringify(data)}`);
-    await redisPublisher.publish(
-      "online_users_update",
-      // @ts-ignore
-      JSON.stringify({ type: "user-in-chat", userId: socket.userId, roomId: data.roomId, isPresent: false })
-    );
   });
 
   socket.on("disconnect", async () => {
