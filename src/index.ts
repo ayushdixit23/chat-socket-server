@@ -110,6 +110,10 @@ const subscribeToRedis = () => {
         io.to(receivedMessage?.roomId).emit("typing", receivedMessage);
       } else if (receivedMessage?.messageType === "not-typing") {
         io.to(receivedMessage?.roomId).emit("not-typing", receivedMessage);
+      }else if(receivedMessage?.messageType === "messageToSeen"){
+        const messages = receivedMessage.messages.map((d:any)=>d.mesId)
+        const stringifyMessages = JSON.stringify(messages)
+        io.to(receivedMessage?.roomId).emit("mark-message-seen", stringifyMessages);
       }
     }
 
@@ -151,7 +155,7 @@ const subscribeToRedis = () => {
       }
     }
     if (receivedMessage?.serverId !== PORT) {
-      console.log("Redis Message Received:", receivedMessage);
+     // console.log("Redis Message Received:", receivedMessage);
     }
   });
 
@@ -209,7 +213,7 @@ io.on("connection", (socket) => {
       serverId: process.env.PORT,
     });
     console.log(`Message sent to RabbitMQ: ${JSON.stringify(data)}`);
-    await sendMessage(data);
+    await sendMessage(data,"insert");
   });
 
   socket.on("join-room", async (roomId) => {
@@ -280,9 +284,18 @@ io.on("connection", (socket) => {
     );
   })
 
+  socket.on("messageToSeen", async (data) => {
+    console.log(`Event Registered`)
+    await sendMessage(data,"update");
+    const parsedData = JSON.parse(data);
+    await publishToRedis({
+      ...parsedData,
+      messageType: "messageToSeen",
+      serverId: process.env.PORT,
+    });
+  })
 
   socket.on("typing", async (data) => {
-    console.log(data);
     await publishToRedis({
       ...data,
       messageType: "typing",
@@ -291,7 +304,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("not-typing", async (data) => {
-    console.log(data);
     await publishToRedis({
       ...data,
       messageType: "not-typing",
