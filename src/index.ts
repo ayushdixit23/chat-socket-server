@@ -118,11 +118,13 @@ const subscribeToRedis = () => {
           stringifyMessages
         );
       } else if (receivedMessage?.messageType === "message:deleted") {
-
         io.to(receivedMessage?.roomId).emit(
           "message:deleted-update",
           receivedMessage
         );
+      } else if (receivedMessage?.messageType === "block-user") {
+        io.to(receivedMessage?.roomId)
+          .emit("block-user-update", receivedMessage);
       }
     }
 
@@ -303,7 +305,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("messageToSeen", async (data) => {
-    console.log(`Event Registered`);
     await sendMessage(data, "update");
     const parsedData = JSON.parse(data);
     await publishToRedis({
@@ -329,6 +330,10 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("clear:chat", async (data) => {
+    await sendMessage(data, "update");
+  })
+
   socket.on("message:deleted", async ({ roomId, userId, mesId, action }) => {
     if (action === "deleteForEveryOne") {
       await publishToRedis({
@@ -351,6 +356,15 @@ io.on("connection", (socket) => {
 
     await sendMessage(stringifyMessgae, "update");
   });
+
+  socket.on("block:user", async (data) => {
+    await publishToRedis({
+      ...data, messageType: "block-user",
+      serverId: process.env.PORT,
+    })
+    const payload= JSON.stringify(data)
+    await sendMessage(payload,"update")
+  })
 
   socket.on("disconnect", async () => {
     // @ts-ignore
