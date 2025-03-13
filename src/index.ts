@@ -102,10 +102,20 @@ const subscribeToRedis = () => {
     if (channel === "chat_channel") {
       if (receivedMessage?.messageType === "message") {
         io.to(receivedMessage?.roomId).emit("message", receivedMessage);
-        io.to(receivedMessage?.receiverId).emit(
-          "user-messages",
-          receivedMessage
-        );
+        if (typeof receivedMessage?.receiverId == "string") {
+          io.to(receivedMessage?.receiverId).emit(
+            "user-messages",
+            receivedMessage
+          )
+        } else {
+          receivedMessage?.receiverId.forEach((rId: string) => {
+            io.to(rId).emit(
+              "user-messages",
+              receivedMessage
+            )
+          })
+        }
+
       } else if (receivedMessage?.messageType === "typing") {
         io.to(receivedMessage?.roomId).emit("typing", receivedMessage);
       } else if (receivedMessage?.messageType === "not-typing") {
@@ -125,9 +135,12 @@ const subscribeToRedis = () => {
       } else if (receivedMessage?.messageType === "block-user") {
         io.to(receivedMessage?.roomId)
           .emit("block-user-update", receivedMessage);
+      } else if (receivedMessage?.messageType === "messageSeenForGroup") {
+        io.to(receivedMessage?.roomId).emit("messageSeenForGroupUpdate", receivedMessage);
       }
     }
 
+    // online user channel
     if (channel == "online_users_update") {
       if (
         receivedMessage.type === "connect" ||
@@ -143,29 +156,50 @@ const subscribeToRedis = () => {
         const otherUsers = usersInRoom.filter(
           (id) => id !== receivedMessage.userId
         );
+        if (otherUsers && otherUsers.length > 0) {
+          otherUsers.forEach((userId) => {
+            io.to(userId).emit("is-present-in-chat", {
+              isPresent: true,
+              roomId: receivedMessage.roomId,
+              userId: receivedMessage.userId,
+            });
 
-        otherUsers.forEach((userId) => {
-          io.to(userId).emit("is-present-in-chat", {
-            isPresent: true,
-            roomId: receivedMessage.roomId,
-            userId: receivedMessage.userId,
+            io.to(userId).emit("get-groupusers-update", {
+              users: usersInRoom,
+              roomId: receivedMessage.roomId,
+              userId: receivedMessage.userId,
+            });
           });
-        });
+        }
       } else if (receivedMessage.type === "user-left-chat") {
-        const usersInRoom = await redisPublisher.smembers(
-          `chat_room:${receivedMessage.roomId}`
-        );
+        const usersInRoom = receivedMessage.users
 
-        usersInRoom.forEach((userId) => {
-          io.to(userId).emit("is-present-in-chat", {
-            isPresent: false,
-            roomId: receivedMessage.roomId,
-            userId: receivedMessage.userId,
+        console.log(usersInRoom, "userinroom")
+
+        if (usersInRoom && usersInRoom.length > 0) {
+          usersInRoom.forEach((userId: any) => {
+            io.to(userId).emit("is-present-in-chat", {
+              isPresent: false,
+              roomId: receivedMessage.roomId,
+              userId: receivedMessage.userId,
+            });
+
+            io.to(userId).emit("get-groupusers-update", {
+              users: usersInRoom,
+              roomId: receivedMessage.roomId,
+              userId: receivedMessage.userId,
+            });
           });
-        });
+        }
       } else if (receivedMessage.type === "user-checking-chat") {
         io.to(receivedMessage.roomId).emit("is-present-in-chat", {
           isPresent: receivedMessage.isPresent,
+          roomId: receivedMessage.roomId,
+          userId: receivedMessage.userId,
+        });
+      } else if (receivedMessage.type === "check-users-for-group") {
+        io.to(receivedMessage.roomId).emit("get-users-for-group-without-me", {
+          users: receivedMessage.users,
           roomId: receivedMessage.roomId,
           userId: receivedMessage.userId,
         });
@@ -281,6 +315,7 @@ io.on("connection", (socket) => {
         roomId,
         //@ts-ignore
         userId: socket.userId,
+        users: usersInRoom
       })
     );
   });
@@ -362,8 +397,22 @@ io.on("connection", (socket) => {
       ...data, messageType: "block-user",
       serverId: process.env.PORT,
     })
-    const payload= JSON.stringify(data)
-    await sendMessage(payload,"update")
+    const payload = JSON.stringify(data)
+    await sendMessage(payload, "update")
+  })
+
+  socket.on("messageSeenForGroup", async (data) => {
+    await publishToRedis({
+      ...data,
+      messageType: "messageSeenForGroup",
+      serverId: process.env.PORT
+    })
+  })
+
+  socket.on("check-users-for-group", async (data) => {
+    const usersInRoom = await redisPublisher.smembers(`chat_room:${data?.roomId}`);
+    const users = usersInRoom.filter((d) => d !== data?.userId)
+    await redisPublisher.publish("online_users_update", JSON.stringify({ users, ...data, type: "check-users-for-group", serverId: process.env.PORT }))
   })
 
   socket.on("disconnect", async () => {
