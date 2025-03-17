@@ -14,7 +14,7 @@ import { verifyToken } from "./utils/jwt.js";
 import client from "prom-client";
 
 // Allowed origins for CORS
-const allowedOrigins = ["http://localhost:3000", "http://localhost:3001", "https://chat-app-seven-rho-22.vercel.app"];
+const allowedOrigins = ["http://localhost:3000", "http://localhost:3001","https://chatapp.ayushdixit.site", "https://chat-app-seven-rho-22.vercel.app"];
 
 // Initialize Express app
 const app = express();

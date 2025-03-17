@@ -1,0 +1,81 @@
+name: Deploy to Google Cloud VM
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Log in to Docker Hub
+    - name: Log in to Docker Hub
+      run: |
+        echo "Logging into Docker Hub..."
+        echo "${{ secrets.DOCKERHUB_ACCESS_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+        echo "Docker login successful!"
+
+    # Build and push Docker image
+    - name: Build and push Docker image
+      run: |
+        echo "Building Docker image..."
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/socket-chat:latest .
+        echo "Docker image built successfully. Pushing to Docker Hub..."
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/socket-chat:latest
+        echo "Docker image pushed successfully!"
+
+    # Set up SSH key
+    - name: Setup SSH key
+      run: |
+        echo "Setting up SSH key..."
+        mkdir -p ~/.ssh
+        echo "${{ secrets.GCP_SSH_PRIVATE_KEY }}" > ~/.ssh/gcp_ecdsa_key
+        chmod 600 ~/.ssh/gcp_ecdsa_key
+        ssh-keyscan ${{ secrets.GCP_VM_IP }} >> ~/.ssh/known_hosts
+        echo "SSH key setup complete!"
+
+
+    # Deploy on GCP VM
+    - name: Deploy on GCP VM
+      run: |
+        echo "Deploying to GCP VM..."
+        ssh -i ~/.ssh/gcp_ecdsa_key ${{ secrets.GCP_VM_USERNAME }}@${{ secrets.GCP_VM_IP }} << 'EOF'
+        set -e  # Exit on error
+
+        # Navigate to the chat-deploy folder and load the .env file
+        echo "Navigating to chat-deploy directory..."
+        cd chat-deploy/
+
+        # Load environment variables from the .env file
+        echo "Loading environment variables from .env file..."
+        export $(cat .env | grep -v ^# | xargs)
+
+        # Stop and remove old chat-rest-server container
+        echo "Stopping and removing old socket-chat container if exists..."
+        sudo docker ps -q --filter "name=socket-chat" | grep -q . && \
+          sudo docker stop socket-chat && \
+          sudo docker rm -f socket-chat
+        echo "Old socket-chat container stopped and removed if it existed."
+
+        # Run new socket-chat container with env variables loaded from .env
+        echo "Starting new socket-chat container..."
+        sudo docker run -d \
+          --name socket-chat \
+          --restart always \
+          --network chat-deploy_backend \
+          -p $PORT_SOCKET_SERVER:$PORT_SOCKET_SERVER \
+          -e PORT=$PORT_SOCKET_SERVER \
+          -e NODE_ENV=$NODE_ENV \
+          -e JWT_SECRET_KEY=$JWT_SECRET_KEY \
+          -e AMPQ_URL=$AMPQ_URL \
+          -e REDIS_URL=$REDIS_URL \
+          ${{ secrets.DOCKERHUB_USERNAME }}/chat-rest-server:latest
+        echo "New chat-rest-server container started successfully!"
+        EOF
+        echo "Deployment to GCP VM completed!"
