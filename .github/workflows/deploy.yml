@@ -60,9 +60,10 @@ jobs:
         # Stop and remove old socket-chat container
         echo "Stopping and removing old socket-chat container if exists..."
         sudo docker ps -q --filter "name=socket-chat" | grep -q . && \
-          sudo docker stop socket-chat && \
-          sudo docker rm -f socket-chat
-        echo "Old socket-chat container stopped and removed if it existed."
+         sudo docker stop socket-chat && \
+         sudo docker rm -f socket-chat && \
+         sudo docker images -q ayushdixit23/socket-chat* | xargs sudo docker rmi -f && \
+         echo "Old socket-chat container stopped and removed along with images."
 
         # Run new socket-chat container with env variables loaded from .env
         echo "Starting new socket-chat container..."
