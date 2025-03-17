@@ -1,16 +1,11 @@
 import { Redis } from "ioredis";
+import { REDIS_URL } from "../utils/envConfig.js";
 
 // Redis Publisher (For sending messages)
-const redisPublisher = new Redis({
-  host: "127.0.0.1",
-  port: 6379,
-});
+const redisPublisher = new Redis(REDIS_URL);
 
 // Redis Subscriber (For receiving messages)
-const redisSubscriber = new Redis({
-  host: "127.0.0.1",
-  port: 6379,
-});
+const redisSubscriber = new Redis(REDIS_URL);
 
 redisPublisher.on("connect", () => {
   console.log("Connected to Redis Publisher");

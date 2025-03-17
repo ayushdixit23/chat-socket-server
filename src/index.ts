@@ -11,12 +11,34 @@ import { CustomError } from "./middlewares/errors/CustomError.js";
 import sendMessage from "./helpers/rabbitmq-producer.js";
 import { redisPublisher, redisSubscriber } from "./helpers/redisClient.js";
 import { verifyToken } from "./utils/jwt.js";
+import client from "prom-client";
 
 // Allowed origins for CORS
-const allowedOrigins = ["http://localhost:3000", "http://localhost:3001"];
+const allowedOrigins = ["http://localhost:3000", "http://localhost:3001", "https://chat-app-seven-rho-22.vercel.app"];
 
 // Initialize Express app
 const app = express();
+
+const register = new client.Registry();
+
+// Default metrics (like CPU, memory usage)
+client.collectDefaultMetrics({ register });
+
+// Custom metrics
+const connectedClients = new client.Gauge({
+  name: "socket_connected_clients",
+  help: "Number of currently connected socket clients",
+});
+
+register.registerMetric(connectedClients);
+
+const messagesReceived = new client.Counter({
+  name: "socket_messages_received",
+  help: "Total number of messages received",
+});
+
+register.registerMetric(messagesReceived);
+
 
 const server = createServer(app);
 
@@ -57,6 +79,12 @@ app.use(
     credentials: true, // Allow cookies to be sent
   })
 );
+
+// Prometheus metrics route
+app.get("/metrics", async (_, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
 
 // Routes
 app.get("/", (_, res) => {

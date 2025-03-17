@@ -1,4 +1,5 @@
 import amqp from 'amqplib';
+import { AMPQ_URL } from '../utils/envConfig.js';
 
 let connection: amqp.Connection | null = null;
 let channel: amqp.Channel | null = null;
@@ -6,7 +7,7 @@ let channel: amqp.Channel | null = null;
 const setupRabbitMQ = async () => {
     try {
         if (!connection) {
-            connection = await amqp.connect('amqp://localhost');
+            connection = await amqp.connect(AMPQ_URL);
         }
         if (!channel) {
             channel = await connection.createChannel();
