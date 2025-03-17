@@ -282,7 +282,7 @@ io.use(async (socket, next) => {
 
 // Socket.IO Logic
 io.on("connection", (socket) => {
-  console.log("New socket client connected:", socket.id);
+  console.log("New socket client connected of socket id:", socket.id);
 
   socket.on("message", async (data) => {
     console.log("Received message at socket server:", data);
